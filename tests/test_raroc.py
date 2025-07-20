@@ -211,7 +211,7 @@ class TestRiskCalculations:
         ead = 1000000  # $1M exposure
         
         expected_loss = pd * lgd * ead
-        assert expected_loss == 20000  # $20k expected loss
+        assert abs(expected_loss - 20000) < 0.01  # $20k expected loss with tolerance
     
     def test_raroc_calculation(self):
         """Test RAROC calculation logic."""
