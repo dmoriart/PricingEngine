@@ -44,11 +44,14 @@ class LogisticPDModel(PDModel):
         PD = 1 / (1 + exp(-(intercept + β1*X1 + β2*X2 + ...)))
         """
         try:
+            # Get column names safely
+            column_names = df.columns
+            
             # Build linear combination
             linear_combination = lit(self.coefficients['intercept'])
             
             for feature, coeff in self.coefficients.items():
-                if feature != 'intercept' and feature in [c.name for c in df.columns]:
+                if feature != 'intercept' and feature in column_names:
                     linear_combination = linear_combination + (col(feature) * lit(coeff))
             
             # Apply logistic function: PD = 1 / (1 + exp(-linear_combination))
@@ -89,6 +92,9 @@ class ScoreBasedPDModel(PDModel):
     def calculate_pd(self, df: DataFrame, features: Dict[str, Any]) -> DataFrame:
         """Calculate PD based on credit score ranges."""
         try:
+            # Get column names safely
+            column_names = df.columns
+            
             result_df = df
             
             # Apply PD based on credit score buckets
@@ -103,7 +109,7 @@ class ScoreBasedPDModel(PDModel):
             result_df = result_df.withColumn('pd_score', pd_condition)
             
             # Apply adjustments based on other factors if available
-            if 'debt_to_income' in [c.name for c in df.columns]:
+            if 'debt_to_income' in column_names:
                 result_df = result_df.withColumn(
                     'pd_score',
                     when(col('debt_to_income') > 0.5, col('pd_score') * lit(1.5))
@@ -140,6 +146,9 @@ class IndustryPDModel(PDModel):
     def calculate_pd(self, df: DataFrame, features: Dict[str, Any]) -> DataFrame:
         """Calculate PD based on industry sector."""
         try:
+            # Get column names safely
+            column_names = df.columns
+            
             # Build industry-based PD mapping
             industry_condition = lit(self.industry_pd['default'])
             
@@ -152,7 +161,7 @@ class IndustryPDModel(PDModel):
             result_df = df.withColumn('pd_score', industry_condition)
             
             # Apply size adjustments if available
-            if 'company_size' in [c.name for c in df.columns]:
+            if 'company_size' in column_names:
                 result_df = result_df.withColumn(
                     'pd_score',
                     when(col('company_size') == 'large', col('pd_score') * lit(0.8))

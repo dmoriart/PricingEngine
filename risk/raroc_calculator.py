@@ -39,9 +39,11 @@ class EADModel:
             
             result_df = df.withColumn('ccf', ccf_condition)
             
+            # Get column names safely
+            column_names = df.columns
+            
             # Calculate EAD
-            if 'outstanding_amount' in [c.name for c in df.columns] and \
-               'undrawn_amount' in [c.name for c in df.columns]:
+            if 'outstanding_amount' in column_names and 'undrawn_amount' in column_names:
                 result_df = result_df.withColumn(
                     'ead_amount',
                     col('outstanding_amount') + (col('undrawn_amount') * col('ccf'))
@@ -144,8 +146,11 @@ class RARoCCalculator:
         - Operational_Cost = EAD × Operational_Rate
         """
         try:
+            # Get column names safely
+            column_names = df.columns
+            
             # Calculate EAD if not already present
-            if 'ead_amount' not in [c.name for c in df.columns]:
+            if 'ead_amount' not in column_names:
                 df = self.ead_model.calculate_ead(df, features)
             
             # Calculate capital requirements
@@ -171,7 +176,7 @@ class RARoCCalculator:
             )
             
             # Calculate revenue (interest + fees)
-            if 'interest_rate' in [c.name for c in df.columns]:
+            if 'interest_rate' in column_names:
                 df = df.withColumn(
                     'interest_revenue',
                     col('ead_amount') * col('interest_rate')
@@ -184,7 +189,7 @@ class RARoCCalculator:
                 )
             
             # Add fees if available
-            if 'fee_rate' in [c.name for c in df.columns]:
+            if 'fee_rate' in column_names:
                 df = df.withColumn(
                     'fee_revenue',
                     col('ead_amount') * col('fee_rate')
