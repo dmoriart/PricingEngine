@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from config.settings import settings
 from pricing.engine import PricingEngine
+from risk.raroc_pricing_engine import RARoCPricingEngine
 from core.spark_manager import spark_manager
 
 # Configure logging
@@ -20,6 +21,36 @@ class ProductRequest(BaseModel):
     category: str = Field(..., description="Product category (basic, standard, premium)")
     cost: float = Field(..., gt=0, description="Product cost")
     quantity: int = Field(..., gt=0, description="Quantity")
+
+class BorrowerRequest(BaseModel):
+    borrower_id: str = Field(..., description="Unique borrower identifier")
+    borrower_name: str = Field(..., description="Borrower name")
+    credit_score: int = Field(..., ge=300, le=850, description="Credit score (300-850)")
+    debt_to_income: float = Field(..., ge=0, le=2, description="Debt-to-income ratio")
+    loan_to_value: float = Field(..., ge=0, le=1.5, description="Loan-to-value ratio")
+    employment_years: int = Field(..., ge=0, description="Years of employment")
+    payment_history_score: int = Field(..., ge=0, le=100, description="Payment history score")
+    industry: str = Field(..., description="Industry sector")
+    company_size: str = Field(..., description="Company size (small, medium, large)")
+    collateral_type: str = Field(..., description="Type of collateral")
+    seniority: str = Field(..., description="Loan seniority (senior_secured, senior_unsecured, subordinated)")
+    facility_type: str = Field(..., description="Facility type (term_loan, revolving_credit, etc.)")
+    exposure_amount: float = Field(..., gt=0, description="Total exposure amount")
+    outstanding_amount: float = Field(..., ge=0, description="Outstanding amount")
+    undrawn_amount: float = Field(..., ge=0, description="Undrawn amount")
+    loan_term: int = Field(..., gt=0, description="Loan term in years")
+    region: str = Field(..., description="Geographic region")
+
+class RARoCPricingRequest(BaseModel):
+    borrowers: List[BorrowerRequest] = Field(..., description="List of borrowers to price")
+    pd_model: str = Field("logistic", description="PD model (logistic, score_based, industry)")
+    lgd_model: str = Field("hybrid", description="LGD model (collateral, industry, hybrid)")
+    risk_type: str = Field("corporate", description="Risk type for capital calculation")
+    target_raroc: float = Field(0.15, gt=0, description="Target RAROC threshold")
+    competitive_margin: float = Field(0.02, ge=0, description="Competitive margin over minimum rate")
+    stress_pd_factor: float = Field(2.0, gt=0, description="PD stress factor")
+    stress_lgd_factor: float = Field(1.3, gt=0, description="LGD stress factor")
+    economic_condition: str = Field("normal", description="Economic condition (recession, normal, expansion)")
 
 class PricingRulesRequest(BaseModel):
     premium_multiplier: float = Field(2.0, gt=0, description="Multiplier for premium products")
@@ -43,6 +74,13 @@ class PricingResponse(BaseModel):
     summary: Optional[Dict[str, Any]] = None
     products: Optional[List[Dict[str, Any]]] = None
 
+class RARoCPricingResponse(BaseModel):
+    success: bool
+    message: str
+    summary: Dict[str, Any]
+    borrowers: List[Dict[str, Any]]
+    model_info: Dict[str, str]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -57,7 +95,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.version,
-    description="A high-performance pricing engine using PySpark for data processing",
+    description="A high-performance pricing engine using PySpark for data processing with RAROC-based risk pricing",
     lifespan=lifespan
 )
 
@@ -70,8 +108,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize pricing engine
+# Initialize pricing engines
 pricing_engine = PricingEngine()
+raroc_pricing_engine = RARoCPricingEngine()
 
 
 @app.get("/")
@@ -174,4 +213,144 @@ async def get_metrics():
         "spark_master": settings.spark_master,
         "api_version": settings.version,
         "debug_mode": settings.debug
+    }
+
+
+@app.post("/raroc/calculate", response_model=RARoCPricingResponse)
+async def calculate_raroc_pricing(request: RARoCPricingRequest):
+    """
+    Calculate RAROC-based pricing for borrowers using PD/LGD models.
+    
+    This endpoint processes borrower data through sophisticated risk models
+    to calculate risk-adjusted return on capital and minimum pricing.
+    """
+    try:
+        # Convert request to Spark DataFrame
+        borrowers_data = [borrower.dict() for borrower in request.borrowers]
+        borrowers_df = raroc_pricing_engine.spark.createDataFrame(borrowers_data)
+        
+        # Prepare features for risk calculation
+        features = {
+            'risk_type': request.risk_type,
+            'target_raroc': request.target_raroc,
+            'competitive_margin': request.competitive_margin,
+            'stress_pd_factor': request.stress_pd_factor,
+            'stress_lgd_factor': request.stress_lgd_factor,
+            'economic_condition': request.economic_condition
+        }
+        
+        # Calculate RAROC pricing
+        result_df, summary = raroc_pricing_engine.calculate_risk_based_pricing(
+            borrowers_df, request.pd_model, request.lgd_model, features
+        )
+        
+        # Collect results
+        results = result_df.collect()
+        borrowers_result = [row.asDict() for row in results]
+        
+        return RARoCPricingResponse(
+            success=True,
+            message=f"Successfully calculated RAROC pricing for {len(borrowers_result)} borrowers",
+            summary=summary,
+            borrowers=borrowers_result,
+            model_info={
+                "pd_model": request.pd_model,
+                "lgd_model": request.lgd_model,
+                "risk_type": request.risk_type
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error calculating RAROC pricing: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"RAROC pricing calculation failed: {str(e)}")
+
+
+@app.get("/raroc/sample")
+async def get_sample_raroc_pricing():
+    """
+    Get sample RAROC pricing calculation using demo portfolio data.
+    
+    This endpoint demonstrates the RAROC pricing engine with sample borrower data.
+    """
+    try:
+        # Create sample portfolio
+        sample_df = raroc_pricing_engine.create_sample_portfolio()
+        
+        # Default parameters
+        features = {
+            'risk_type': 'corporate',
+            'target_raroc': 0.15,
+            'competitive_margin': 0.02,
+            'economic_condition': 'normal'
+        }
+        
+        # Calculate RAROC pricing
+        result_df, summary = raroc_pricing_engine.calculate_risk_based_pricing(
+            sample_df, 'logistic', 'hybrid', features
+        )
+        
+        # Get results
+        results = result_df.collect()
+        borrowers_result = [row.asDict() for row in results]
+        
+        return RARoCPricingResponse(
+            success=True,
+            message="Sample RAROC pricing calculation completed",
+            summary=summary,
+            borrowers=borrowers_result,
+            model_info={
+                "pd_model": "logistic",
+                "lgd_model": "hybrid",
+                "risk_type": "corporate"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error with sample RAROC pricing: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Sample RAROC pricing failed: {str(e)}")
+
+
+@app.post("/raroc/benchmark")
+async def benchmark_raroc_models(borrowers: List[BorrowerRequest]):
+    """
+    Benchmark different PD/LGD model combinations for the same portfolio.
+    
+    This endpoint compares the performance of different risk model combinations.
+    """
+    try:
+        # Convert to DataFrame
+        borrowers_data = [borrower.dict() for borrower in borrowers]
+        borrowers_df = raroc_pricing_engine.spark.createDataFrame(borrowers_data)
+        
+        # Benchmark models
+        benchmark_results = raroc_pricing_engine.benchmark_pricing_models(borrowers_df)
+        
+        return {
+            "success": True,
+            "message": f"Benchmarked models for {len(borrowers)} borrowers",
+            "benchmark_results": benchmark_results,
+            "models_compared": list(benchmark_results.keys())
+        }
+        
+    except Exception as e:
+        logger.error(f"Error benchmarking RAROC models: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Model benchmarking failed: {str(e)}")
+
+
+@app.get("/raroc/models")
+async def get_available_models():
+    """Get information about available PD and LGD models."""
+    return {
+        "pd_models": {
+            "logistic": "Logistic regression-based PD model with multiple risk factors",
+            "score_based": "Credit score-based PD model with rating buckets", 
+            "industry": "Industry-specific PD model with sector risk factors"
+        },
+        "lgd_models": {
+            "collateral": "Collateral-based LGD model with recovery rates by asset type",
+            "industry": "Industry-based LGD model with sector recovery characteristics",
+            "hybrid": "Hybrid model combining collateral and industry factors"
+        },
+        "risk_types": ["corporate", "sme", "retail", "sovereign", "bank"],
+        "economic_conditions": ["recession", "normal", "expansion"]
     }
