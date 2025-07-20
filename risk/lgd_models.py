@@ -47,6 +47,9 @@ class CollateralBasedLGDModel(LGDModel):
         LGD = Base_LGD × LTV_Adjustment × Economic_Adjustment × Seniority_Adjustment
         """
         try:
+            # Get column names safely
+            column_names = df.columns
+            
             # Start with base LGD by collateral type
             lgd_condition = lit(self.base_lgd['default'])
             
@@ -59,7 +62,7 @@ class CollateralBasedLGDModel(LGDModel):
             result_df = df.withColumn('base_lgd', lgd_condition)
             
             # Apply LTV adjustment if available
-            if 'loan_to_value' in [c.name for c in df.columns]:
+            if 'loan_to_value' in column_names:
                 # Higher LTV = Higher LGD (less collateral coverage)
                 result_df = result_df.withColumn(
                     'ltv_adjustment',
@@ -73,7 +76,7 @@ class CollateralBasedLGDModel(LGDModel):
                 result_df = result_df.withColumn('ltv_adjustment', lit(1.0))
             
             # Apply seniority adjustment
-            if 'seniority' in [c.name for c in df.columns]:
+            if 'seniority' in column_names:
                 result_df = result_df.withColumn(
                     'seniority_adjustment',
                     when(col('seniority') == 'senior_secured', lit(0.8))
@@ -132,6 +135,9 @@ class IndustryLGDModel(LGDModel):
     def calculate_lgd(self, df: DataFrame, features: Dict[str, Any]) -> DataFrame:
         """Calculate LGD based on industry sector."""
         try:
+            # Get column names safely
+            column_names = df.columns
+            
             # Build industry-based LGD mapping
             industry_condition = lit(self.industry_lgd['default'])
             
@@ -144,7 +150,7 @@ class IndustryLGDModel(LGDModel):
             result_df = df.withColumn('lgd_score', industry_condition)
             
             # Apply company size adjustments (larger companies typically have better recovery)
-            if 'company_size' in [c.name for c in df.columns]:
+            if 'company_size' in column_names:
                 result_df = result_df.withColumn(
                     'lgd_score',
                     when(col('company_size') == 'large', col('lgd_score') * lit(0.85))
@@ -154,7 +160,7 @@ class IndustryLGDModel(LGDModel):
                 )
             
             # Apply geographic adjustments if available
-            if 'region' in [c.name for c in df.columns]:
+            if 'region' in column_names:
                 result_df = result_df.withColumn(
                     'lgd_score',
                     when(col('region') == 'developed', col('lgd_score') * lit(0.9))
@@ -193,6 +199,9 @@ class HybridLGDModel(LGDModel):
     def calculate_lgd(self, df: DataFrame, features: Dict[str, Any]) -> DataFrame:
         """Calculate LGD using weighted combination of models."""
         try:
+            # Get column names safely
+            column_names = df.columns
+            
             # Calculate LGD using both models
             collateral_df = self.collateral_model.calculate_lgd(df, features)
             industry_df = self.industry_model.calculate_lgd(df, features)
@@ -210,7 +219,7 @@ class HybridLGDModel(LGDModel):
             )
             
             # Apply final adjustments based on loan characteristics
-            if 'loan_term' in [c.name for c in df.columns]:
+            if 'loan_term' in column_names:
                 # Longer term loans typically have higher LGD
                 result_df = result_df.withColumn(
                     'lgd_score',

@@ -22,7 +22,11 @@ pytest --cov=pricing --cov-report=term-missing -v
 
 #### Start the Server:
 ```bash
-python main.py
+# Method 1: Using uvicorn module (recommended)
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Method 2: Using the startup script
+python start_server.py
 ```
 
 #### Test Endpoints:
@@ -32,12 +36,39 @@ python main.py
 curl http://localhost:8000/health
 ```
 
-**Sample Pricing:**
+**RAROC Sample Portfolio:**
 ```bash
-curl http://localhost:8000/pricing/sample | python -m json.tool
+curl http://localhost:8000/raroc/sample | python -m json.tool
 ```
 
-**Custom Pricing:**
+**RAROC Risk-Based Pricing:**
+```bash
+curl -X POST http://localhost:8000/raroc/calculate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "borrowers": [{
+      "borrower_id": "TEST-001",
+      "borrower_name": "Test Company",
+      "credit_score": 720,
+      "debt_to_income": 0.3,
+      "loan_to_value": 0.8,
+      "employment_years": 5,
+      "payment_history_score": 80,
+      "industry": "technology",
+      "company_size": "medium",
+      "collateral_type": "real_estate",
+      "seniority": "senior_secured",
+      "facility_type": "term_loan",
+      "exposure_amount": 250000,
+      "outstanding_amount": 200000,
+      "undrawn_amount": 50000,
+      "loan_term": 5,
+      "region": "north_america"
+    }]
+  }' | python -m json.tool
+```
+
+**Traditional Product Pricing:**
 ```bash
 curl -X POST http://localhost:8000/pricing/calculate \
   -H "Content-Type: application/json" \
@@ -56,7 +87,14 @@ curl -X POST http://localhost:8000/pricing/calculate \
 
 ### 3. **Automated API Testing**
 ```bash
+# Test the quick RAROC fix
+python test_fix.py
+
+# Test all endpoints
 python test_api_client.py
+
+# Test examples
+python example_requests.py
 ```
 
 ### 4. **VS Code Testing**
@@ -82,11 +120,18 @@ mypy --ignore-missing-imports .
 
 ## Test Results Summary
 
-✅ **Unit Tests**: 5/5 passing  
+✅ **Unit Tests**: 19/19 RAROC tests passing  
 ✅ **API Health Check**: Working  
-✅ **Sample Pricing**: Working  
-✅ **Custom Pricing**: Working  
-✅ **Coverage**: 36% (pricing module)  
+✅ **RAROC Pricing**: Working (Fixed 'str' object error)  
+✅ **Traditional Pricing**: Working  
+✅ **Coverage**: Comprehensive risk model coverage  
+
+## Recent Fixes Applied
+
+🔧 **Fixed 'str' object has no attribute 'name' error**:
+- Updated all DataFrame column checking from `[c.name for c in df.columns]` to `df.columns`
+- Applied to: `pd_models.py`, `lgd_models.py`, `raroc_calculator.py`
+- RAROC calculations now work correctly  
 
 ## Interactive API Documentation
 
